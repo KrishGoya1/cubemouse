@@ -12,6 +12,9 @@ use futures_util::{StreamExt};
 
 use crate::server::protocol::{Packet, parse_packet};
 use crate::server::input::handle_move;
+use crate::server::input::handle_left_click;
+use crate::server::input::handle_right_click;
+use crate::server::input::handle_scroll;
 
 pub async fn run_server(addr: &str) -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
@@ -64,10 +67,11 @@ pub async fn run_server(addr: &str) -> anyhow::Result<()> {
                     Ok(Message::Binary(data)) => {
                         if let Some(packet) = parse_packet(&data) {
                             match packet {
-                                Packet::Move { dx, dy } => {
-                                    handle_move(dx, dy);
-                                }
-                                // Add other packet handling here.
+                                    Packet::Move { dx, dy } => handle_move(dx, dy),
+                                    Packet::LeftClick => handle_left_click(),
+                                    Packet::RightClick => handle_right_click(),
+                                    Packet::Scroll { dy } => handle_scroll(dy),
+
                             }
                         }
                     }
