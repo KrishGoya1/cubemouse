@@ -1,0 +1,302 @@
+Perfect — here’s your **production-quality `README.md`**, ready to drop into your GitHub repo.
+It’s structured like a professional open-source project: clean sections, GitHub-friendly formatting, badges, diagrams, and developer focus.
+This version reflects everything we’ve designed so far — architecture, protocol, rationale, and roadmap.
+
+---
+
+```markdown
+# 🖱️ TrackPadLink  
+### *Control your PC cursor using your phone’s touchscreen.*
+
+[![Language: Rust](https://img.shields.io/badge/language-Rust-orange)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![Status](https://img.shields.io/badge/status-Prototype-yellow)]()
+[![Contributions](https://img.shields.io/badge/contributions-welcome-brightgreen)]()
+
+---
+
+## 📖 Overview
+
+**TrackPadLink** is a lightweight cross-device interaction system written in **Rust**, designed to transform a smartphone into a wireless trackpad for a PC.  
+It establishes a secure, low-latency WebSocket connection between the devices and transmits binary-encoded input events (cursor movement, clicks, scrolls, etc.) in real-time.
+
+This project is both a learning experience in systems design and a demonstration of **clean, production-level architecture**.
+
+---
+
+## 🎯 Project Vision
+
+> **To create a minimal, performant, and extensible framework that turns a smartphone into a seamless input device for a PC, while demonstrating production-grade code structure and documentation quality.**
+
+### Objectives
+- ✨ Write idiomatic, modular **Rust** code.  
+- ⚡ Build a **custom binary protocol** for efficiency.  
+- 🔒 Maintain a **secure, persistent WebSocket channel**.  
+- 🧩 Keep architecture clean, extensible, and well-documented.  
+- 💡 Demonstrate **real-world engineering thinking** in a small project.
+
+---
+
+## 🧱 System Architecture
+
+### High-Level Overview
+
+```
+
+┌───────────────────────────┐
+│           PC              │
+│───────────────────────────│
+│  QR Code Generator        │
+│  Connection Manager       │
+│  Protocol Parser          │
+│  Input Translator         │
+│───────────────────────────│
+│        OS Cursor API      │
+└───────────────────────────┘
+▲
+WebSocket  │
+Channel    │
+▼
+┌───────────────────────────┐
+│     Android / iOS         │
+│───────────────────────────│
+│  Connection Manager       │
+│  Data Encoder             │
+│  Input Capture Module     │
+│  UI for User              │
+└───────────────────────────┘
+
+```
+
+---
+
+## 🧩 Module Responsibilities
+
+| Module | Platform | Description |
+|---------|-----------|-------------|
+| **QR Code Generator** | PC | Generates a QR with the server’s WebSocket address. |
+| **Connection Manager** | Both | Handles WebSocket connection lifecycle. |
+| **Protocol Parser** | PC | Decodes binary messages from client. |
+| **Input Translator** | PC | Maps packets to OS-level cursor/click events. |
+| **Input Capture** | Mobile | Captures screen touches, taps, and swipes. |
+| **Data Encoder** | Mobile | Converts touch data into binary packets. |
+| **User Interface** | Mobile | Minimal UI for touchpad surface and connection feedback. |
+
+---
+
+## 🔌 Communication Flow
+
+1. **Pairing Phase**
+   - PC launches WebSocket server and generates a QR code with connection info.
+   - Mobile scans the QR and connects automatically.
+
+2. **Handshake Phase**
+   - Mobile sends a `HANDSHAKE_INIT` packet announcing its version and capabilities.
+   - PC validates and prepares for session input.
+
+3. **Session Phase**
+   - Mobile continuously sends input packets (`MOVE`, `CLICK`, `SCROLL`).
+   - PC decodes and translates them into cursor events.
+
+4. **Termination Phase**
+   - Either side can gracefully close the session.
+
+---
+
+## ⚙️ TrackPadLink Binary Protocol v1
+
+### Packet Structure
+
+| Field | Size (bytes) | Description |
+|--------|---------------|-------------|
+| **Opcode** | 1 | Message type identifier |
+| **Length** | 1 | Payload size in bytes |
+| **Payload** | Variable | Data depending on opcode |
+| **Checksum** | 1 (optional) | XOR of all previous bytes (for debug) |
+
+---
+
+### Opcode Map
+
+| Range | Category | Description |
+|--------|-----------|-------------|
+| `0x01–0x1F` | Cursor / Motion | Movement and scroll events |
+| `0x20–0x3F` | Click / Tap | Button and tap actions |
+| `0x40–0x5F` | Control / Session | Keepalive, handshake, and config |
+| `0x60–0x7F` | Reserved | Gestures, multi-touch (future) |
+| `0x80+` | Vendor-defined | Extensions |
+
+---
+
+### Opcode Details
+
+#### `0x01` — MOVE
+Moves the cursor by relative deltas.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `dx` | `int16` | Horizontal movement delta |
+| `dy` | `int16` | Vertical movement delta |
+
+Example: `01 04 05 00 02 00` → Move right 5px, down 2px.
+
+---
+
+#### `0x02` — SCROLL
+Scroll wheel movement.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `dx` | `int16` | Horizontal scroll delta |
+| `dy` | `int16` | Vertical scroll delta |
+
+---
+
+#### `0x10` — CLICK
+Tap or click events.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `button` | `u8` | 0 = left, 1 = right, 2 = middle |
+| `state` | `u8` | 0 = down, 1 = up, 2 = tap |
+| `fingers` | `u8` | Number of fingers (default = 1) |
+
+---
+
+#### `0x20` — KEEPALIVE
+Maintains connection liveness.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `timestamp` | `uint32` | Unix time or uptime in ms |
+
+---
+
+#### `0x21` — HANDSHAKE_INIT
+Sent once upon connection start.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `protocol_version` | `u8` | e.g. `0x01` |
+| `device_type` | `u8` | 0 = Android, 1 = iOS |
+| `capabilities` | `u16` | bitmask (e.g., scroll, gestures) |
+
+---
+
+#### `0x22` — CONFIG_UPDATE
+Runtime parameter update.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `param_id` | `u8` | 0 = sensitivity, 1 = scroll invert |
+| `value` | Variable | Value depending on parameter |
+
+---
+
+### Example Packet Sequence
+
+| Action | Hex Bytes | Meaning |
+|---------|------------|---------|
+| Handshake | `21 04 01 00 03 00` | Version 1, Android, supports scroll+gesture |
+| Move | `01 04 05 00 02 00` | Move 5px right, 2px down |
+| Left Tap | `10 03 00 00 01` + `10 03 00 01 01` | Down + Up |
+| Keepalive | `20 04 E8 03 00 00` | Timestamp = 1000ms |
+
+---
+
+## 🧠 Design Rationale
+
+### Why Binary?
+- Lower latency and CPU overhead than JSON.
+- Minimal parsing logic on both ends.
+- Compact packet size (3–8 bytes typical).
+
+### Why WebSocket?
+- Persistent, reliable, and ordered transmission.
+- Built-in support across languages and mobile SDKs.
+- Perfect for LAN-based real-time input systems.
+
+### Why Rust?
+- Excellent concurrency and safety guarantees.
+- Suited for low-level event translation.
+- Modern async ecosystem with `tokio` and `tungstenite`.
+
+---
+
+## 🧰 Tech Stack
+
+| Layer | Technology |
+|--------|-------------|
+| **Language** | Rust |
+| **Async Runtime** | Tokio |
+| **Networking** | tokio-tungstenite |
+| **Input Simulation** | enigo / mouse-rs |
+| **Mobile Client** | Android (Kotlin) or Flutter |
+| **QR Generator** | qrcode-rust / image crate |
+
+---
+
+## 🚧 Roadmap
+
+| Feature | Description | Status |
+|----------|--------------|--------|
+| Gestures | Pinch, rotate, swipe | 🔜 Planned |
+| Multi-touch | Finger tracking | 🔜 Planned |
+| Secure Channel | TLS / encryption | 🔜 Planned |
+| Desktop GUI | QR display + logs | 🧠 Design |
+| Config Sync | Per-device profiles | 🔜 Future |
+
+---
+
+## 🧪 Development Guidelines
+
+- **Project Structure**
+```
+
+src/
+├── main.rs
+├── server/
+│   ├── mod.rs
+│   ├── connection.rs
+│   ├── protocol.rs
+│   └── translator.rs
+├── utils/
+│   ├── qr.rs
+│   └── logging.rs
+└── config/
+└── settings.rs
+
+```
+
+- Use async Rust (`tokio`) for concurrency.
+- Write **unit tests** for protocol parsing.
+- Keep module boundaries clear — communication, decoding, and OS-level actions are separate layers.
+- Follow Rustdoc-style inline documentation.
+
+---
+
+## 🧭 Summary
+
+TrackPadLink combines **low-level system design** with **clean architecture principles**.  
+It’s built to be efficient, educational, and production-minded — an example of how to think like a **systems engineer** rather than just a coder.
+
+---
+
+## 📄 Appendix
+
+> **Design Principles**
+> - Separate concerns — *transport*, *parsing*, *action* should never mix.  
+> - Prefer compact binary semantics over verbose formats.  
+> - Documentation is a first-class citizen of the system.
+
+---
+
+**License:** MIT  
+**Author:** *TrackPadLink Developers*  
+**Version:** 0.1.0  
+```
+
+---
+
+Would you like me to prepare a **companion `docs/ARCHITECTURE.md`** next?
+It would go deeper into your module-level Rust architecture (how to structure the async runtime, server-client event loop, and protocol handling), so your repo feels *enterprise-grade*.
