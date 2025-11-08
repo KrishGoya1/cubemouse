@@ -1,11 +1,4 @@
-Perfect — here’s your **production-quality `README.md`**, ready to drop into your GitHub repo.
-It’s structured like a professional open-source project: clean sections, GitHub-friendly formatting, badges, diagrams, and developer focus.
-This version reflects everything we’ve designed so far — architecture, protocol, rationale, and roadmap.
-
----
-
-```markdown
-# 🖱️ TrackPadLink  
+#  CubeMouse  
 ### *Control your PC cursor using your phone’s touchscreen.*
 
 [![Language: Rust](https://img.shields.io/badge/language-Rust-orange)]()
@@ -17,7 +10,7 @@ This version reflects everything we’ve designed so far — architecture, proto
 
 ## 📖 Overview
 
-**TrackPadLink** is a lightweight cross-device interaction system written in **Rust**, designed to transform a smartphone into a wireless trackpad for a PC.  
+**CubeMouse** is a lightweight cross-device interaction system written in **Rust**, designed to transform a smartphone into a wireless trackpad for a PC.  
 It establishes a secure, low-latency WebSocket connection between the devices and transmits binary-encoded input events (cursor movement, clicks, scrolls, etc.) in real-time.
 
 This project is both a learning experience in systems design and a demonstration of **clean, production-level architecture**.
@@ -103,7 +96,7 @@ Channel    │
 
 ---
 
-## ⚙️ TrackPadLink Binary Protocol v1
+## ⚙️ CubeMouse Binary Protocol v1
 
 ### Packet Structure
 
@@ -277,7 +270,7 @@ src/
 
 ## 🧭 Summary
 
-TrackPadLink combines **low-level system design** with **clean architecture principles**.  
+CubeMouse combines **low-level system design** with **clean architecture principles**.  
 It’s built to be efficient, educational, and production-minded — an example of how to think like a **systems engineer** rather than just a coder.
 
 ---
@@ -292,11 +285,5 @@ It’s built to be efficient, educational, and production-minded — an example 
 ---
 
 **License:** MIT  
-**Author:** *TrackPadLink Developers*  
+**Author:** *CubeMouse Developers*  
 **Version:** 0.1.0  
-```
-
----
-
-Would you like me to prepare a **companion `docs/ARCHITECTURE.md`** next?
-It would go deeper into your module-level Rust architecture (how to structure the async runtime, server-client event loop, and protocol handling), so your repo feels *enterprise-grade*.

@@ -1,24 +1,15 @@
-Fantastic — this is exactly what seasoned engineers do before writing a single line of code: define **clear boundaries, flow, and reasoning** in an `ARCHITECTURE.md`.
-
-Below is a production-grade draft for your project’s
-`docs/ARCHITECTURE.md`.
-It’s deeply technical, structured like internal architecture documentation used in professional engineering teams — focusing on modular design, async behavior, and maintainability.
-
----
-
-```markdown
-# 🧠 TrackPadLink — Architecture Documentation
+# 🧠 CubeMouse — Architecture Documentation
 
 **Version:** 1.0  
 **Last Updated:** November 2025  
-**Authors:** TrackPadLink Developers  
+**Authors:** CubeMouse Developers  
 **Status:** Draft / Design Stage  
 
 ---
 
 ## 1. Overview
 
-TrackPadLink is a **cross-device input streaming system** that allows a smartphone to act as a trackpad for a PC.  
+CubeMouse is a **cross-device input streaming system** that allows a smartphone to act as a trackpad for a PC.  
 The system is designed around **clear modular separation**, **binary protocols**, and **asynchronous networking** using Rust’s modern ecosystem.
 
 This document describes the **architectural design**, **module boundaries**, and **data flow** within the system.
@@ -29,7 +20,7 @@ This document describes the **architectural design**, **module boundaries**, and
 
 > “Software should be modular enough to outgrow its first idea.”
 
-TrackPadLink follows four core engineering principles:
+CubeMouse follows four core engineering principles:
 
 1. **Isolation of Concerns** — Each module serves a single, defined purpose (networking, parsing, UI, etc.).
 2. **Protocol First** — Communication structure drives design, not implementation convenience.
@@ -128,7 +119,7 @@ pub trait ConnectionHandler {
 
 ### 5.2 `server/protocol.rs`
 
-Implements the **TrackPadLink Binary Protocol v1**.
+Implements the **CubeMouse Binary Protocol v1**.
 
 #### Responsibilities
 
@@ -322,7 +313,7 @@ Scan QR → connect → start sending binary frames.
 
 > **“The perfect small system is one where every byte, every module, and every decision earns its keep.”**
 
-TrackPadLink’s architecture emphasizes:
+CubeMouse’s architecture emphasizes:
 
 * Predictable behavior under load.
 * Separation of protocol and system logic.
@@ -332,11 +323,3 @@ TrackPadLink’s architecture emphasizes:
 ---
 
 **End of Document**
-
-```
-
----
-
-Would you like me to follow this with a short **`docs/PROTOCOL_SPEC.md`** file next — a dedicated standalone spec describing just the binary format (with byte offsets, bitfield breakdowns, and visual diagrams)?  
-That file would complement this one and your `README.md` — making your repo look like a polished engineering-grade SDK project.
-```
