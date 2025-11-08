@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CubeMouse</title>
+<style>
+body { margin:0; background:#111; color:white; font-family:sans-serif; }
+#pad { width:100vw; height:100vh; background:#222; touch-action:none; }
+</style>
+</head>
+<body>
+<div id="pad"></div>
+
+<script>
+const ws = new WebSocket("ws://" + location.hostname + ":9000");
+ws.binaryType = "arraybuffer";
+
+function sendClick(op) {
+  const buf = new ArrayBuffer(1);
+  new DataView(buf).setUint8(0, op);
+  ws.readyState === 1 && ws.send(buf);
+}
+
+function sendScroll(dy) {
+  const buf = new ArrayBuffer(3);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x04);
+  dv.setInt16(1, dy, true);
+  ws.send(buf);
+}
+
+let lastX=null,lastY=null;
+let touchCount=0;
+let startTime=0;
+
+const pad=document.getElementById("pad");
+
+pad.addEventListener("touchstart",e=>{
+  touchCount=e.touches.length;
+  const t=e.touches[0];
+  lastX=t.clientX; lastY=t.clientY;
+  startTime=Date.now();
+},{passive:false});
+
+pad.addEventListener("touchmove",e=>{
+  if (touchCount===2){ // scroll
+    const t=e.touches[0];
+    const dy = t.clientY - lastY;
+    sendScroll(dy);
+    lastY=t.clientY;
+    e.preventDefault();
+    return;
+  }
+  const t=e.touches[0];
+  const dx=t.clientX-lastX, dy=t.clientY-lastY;
+  const buf=new ArrayBuffer(5);
+  const dv=new DataView(buf);
+  dv.setUint8(0,0x01);
+  dv.setInt16(1,dx,true);
+  dv.setInt16(3,dy,true);
+  ws.send(buf);
+  lastX=t.clientX; lastY=t.clientY;
+  e.preventDefault();
+},{passive:false});
+
+pad.addEventListener("touchend",e=>{
+  if (Date.now()-startTime < 170) {
+    if (touchCount===1) sendClick(0x02);      // left click
+    else if (touchCount===2) sendClick(0x03); // right click
+  }
+  lastX=lastY=null;
+  touchCount=0;
+});
+</script>
+</body>
+</html>
