@@ -285,5 +285,5 @@ It’s built to be efficient, educational, and production-minded — an example 
 ---
 
 **License:** MIT  
-**Author:** *CubeMouse Developers*  
+**Author:** *Krish Goyal*  
 **Version:** 0.1.0  
