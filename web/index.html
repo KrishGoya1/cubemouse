@@ -1,53 +1,71 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CubeMouse — improved</title>
+<title>CubeMouse — Apple-Perfect Scroll</title>
 <style>
-  body { margin:0; background:#111; color:white; font-family:sans-serif; }
-  #pad { width:100vw; height:100vh; background:#222; touch-action:none; position:relative; }
-  /* small overlay to show current mode (helpful for debugging) */
+  body {
+    margin: 0;
+    background: #111;
+    color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow: hidden;
+  }
+  #pad {
+    width: 100vw;
+    height: 100vh;
+    background: #222;
+    touch-action: none;
+    position: relative;
+  }
   #modeBadge {
     position: absolute;
     right: 12px;
     top: 12px;
     padding: 6px 10px;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0,0,0,0.4);
     border-radius: 8px;
     font-size: 13px;
     color: #fff;
     pointer-events: none;
     transition: background .15s;
   }
-  #modeBadge.scroll { background: rgba(0,120,220,0.25); }
-  #modeBadge.move { background: rgba(80,160,80,0.25); }
+  #modeBadge.scroll { background: rgba(0,120,255,0.25); }
+  #modeBadge.move   { background: rgba(50,200,120,0.25); }
+  #controls {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(0,0,0,0.3);
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+  #controls label {
+    display: block;
+    margin-bottom: 4px;
+  }
 </style>
 </head>
 <body>
-<div id="pad"><div id="modeBadge">idle</div></div>
+<div id="pad">
+  <div id="modeBadge">idle</div>
+  <div id="controls">
+    <label>Friction: <input type="range" id="friction" min="0.90" max="0.99" step="0.001" value="0.945"></label>
+    <label>Sensitivity: <input type="range" id="sensitivity" min="0.5" max="2" step="0.05" value="1"></label>
+  </div>
+</div>
 
 <script>
-/*
- Improved, forgiving touchpad for browser -> websocket pointer/scroll control.
- Key features:
-  - explicit mode (none/move/scroll)
-  - debounce/grace when fingers lift (tolerates asynchronous lifts)
-  - smoothing (EMA) and clamp on deltas
-  - click detection requires short duration + small movement
-  - requestAnimationFrame throttling for sends
-*/
-
 const ws = new WebSocket("ws://" + location.hostname + ":9000");
 ws.binaryType = "arraybuffer";
 
-// --- message helpers (keep your original wire format) ---
 function sendClick(op) {
   const buf = new ArrayBuffer(1);
   new DataView(buf).setUint8(0, op);
   if (ws.readyState === 1) ws.send(buf);
 }
 function sendMove(dx, dy) {
-  // dx/dy are integers
   const buf = new ArrayBuffer(5);
   const dv = new DataView(buf);
   dv.setUint8(0, 0x01);
@@ -63,234 +81,178 @@ function sendScroll(dy) {
   if (ws.readyState === 1) ws.send(buf);
 }
 
-// --- UI / state ---
-const pad = document.getElementById('pad');
-const modeBadge = document.getElementById('modeBadge');
+const pad = document.getElementById("pad");
+const modeBadge = document.getElementById("modeBadge");
+const frictionSlider = document.getElementById("friction");
+const sensitivitySlider = document.getElementById("sensitivity");
+
+let DECELERATION_FACTOR = parseFloat(frictionSlider.value);
+let SENSITIVITY = parseFloat(sensitivitySlider.value);
+
+// Live tuning
+frictionSlider.addEventListener("input", () => DECELERATION_FACTOR = parseFloat(frictionSlider.value));
+sensitivitySlider.addEventListener("input", () => SENSITIVITY = parseFloat(sensitivitySlider.value));
 
 function setMode(m) {
-  mode = m;
   modeBadge.textContent = m;
-  modeBadge.className = (m === 'scroll' ? 'scroll' : (m === 'move' ? 'move' : ''));
+  modeBadge.className = m;
 }
 
-// --- algorithmic params (tweakable) ---
-const LIFT_DEBOUNCE_MS = 80;      // wait before finalizing touchend / mode change
-const SCROLL_GRACE_MS = 120;      // keep scroll mode alive if behavior still looks like scroll
-const CLICK_TIME_MAX = 170;       // max duration for tap -> click
-const CLICK_MOVE_MAX = 10;        // max movement (pixels) allowed for tap -> click
-const MAX_DELTA_CLAMP = 250;      // clamp sudden spikes to this many px
-const EMA_ALPHA = 0.35;           // smoothing factor for deltas
+// Apple-style tuned constants
+const LIFT_DEBOUNCE_MS = 50;
+const SCROLL_GRACE_MS = 80;
+const CLICK_TIME_MAX = 170;
+const CLICK_MOVE_MAX = 10;
+const EMA_ALPHA = 0.25;
+const DECELERATION_BASE = 0.945;
+const MIN_VELOCITY = 0.015; // px/ms
+const VELOCITY_ALPHA = 0.2;
+const MAX_FRAME_DELTA = 500;
 
-// --- runtime state ---
-let mode = 'none'; // 'none' | 'move' | 'scroll'
 let touchStartTime = 0;
 let touchStartCount = 0;
-let initialPositions = {}; // id -> {x,y}
-let lastPositions = {};    // id -> {x,y}
-let lastAvg = null;        // {x,y} average baseline for multi-touch scroll
-let ema = {dx:0, dy:0};     // smoothed deltas
-let sendPending = null;    // frame callback id
-let lastSent = {dx:0, dy:0};
+let accumulatedMove = 0;
+let mode = "idle";
+let initialPositions = {}, lastPositions = {};
+let lastAvg = null;
+let ema = { dx:0, dy:0 };
+let velocity = 0;
+let lastMoveTime = null;
+let momentumAnim = null;
+let momentumRemainder = 0;
 let liftTimer = null;
 let scrollGraceTimer = null;
-let accumulatedMoveDuringTouch = 0;
 
-// helper: compute average point for touches list
-function avgTouchPoint(touchList) {
-  let sx=0, sy=0, n=touchList.length;
-  for (let i=0;i<n;i++){ sx += touchList[i].clientX; sy += touchList[i].clientY; }
-  return { x: sx/n, y: sy/n };
+function avgTouchPoint(touches) {
+  let sx=0, sy=0, n=touches.length;
+  for (let i=0; i<n; i++) { sx+=touches[i].clientX; sy+=touches[i].clientY; }
+  return { x:sx/n, y:sy/n };
 }
-
-// helper: copy positions
 function savePositions(touches) {
-  initialPositions = {};
-  lastPositions = {};
+  initialPositions={}; lastPositions={};
   for (let i=0;i<touches.length;i++){
     const t = touches[i];
-    initialPositions[t.identifier] = {x: t.clientX, y: t.clientY};
-    lastPositions[t.identifier] = {x: t.clientX, y: t.clientY};
+    initialPositions[t.identifier]={x:t.clientX,y:t.clientY};
+    lastPositions[t.identifier]={x:t.clientX,y:t.clientY};
   }
 }
-
-// clamp utility
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
-// send throttled via RAF
-function scheduleSendMove(dx, dy) {
-  // accumulate into ema then send in RAF
-  ema.dx = EMA_ALPHA * dx + (1-EMA_ALPHA) * ema.dx;
-  ema.dy = EMA_ALPHA * dy + (1-EMA_ALPHA) * ema.dy;
-
-  // clamp to avoid spikes
-  let sdx = Math.round(clamp(ema.dx, -MAX_DELTA_CLAMP, MAX_DELTA_CLAMP));
-  let sdy = Math.round(clamp(ema.dy, -MAX_DELTA_CLAMP, MAX_DELTA_CLAMP));
-  // Avoid sending many identical tiny packets
-  if (sendPending === null) {
-    sendPending = requestAnimationFrame(()=> {
-      sendPending = null;
-      // if both 0, nothing to send
-      if (sdx === 0 && sdy === 0) return;
-      sendMove(sdx, sdy);
-      lastSent.dx = sdx;
-      lastSent.dy = sdy;
-      // decay ema a bit so it stabilizes
-      ema.dx *= 0.7; ema.dy *= 0.7;
-    });
-  }
-}
-
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function scheduleSendScroll(dy) {
-  // small smoothing
-  ema.dy = EMA_ALPHA * dy + (1-EMA_ALPHA) * ema.dy;
-  const sdy = Math.round(clamp(ema.dy, -MAX_DELTA_CLAMP, MAX_DELTA_CLAMP));
-  if (sendPending === null) {
-    sendPending = requestAnimationFrame(()=> {
-      sendPending = null;
-      if (sdy === 0) return;
-      sendScroll(sdy);
-      // decay ema
-      ema.dy *= 0.7;
-    });
+  ema.dy = EMA_ALPHA * dy + (1-EMA_ALPHA)*ema.dy;
+  const sdy = Math.round(clamp(ema.dy*SENSITIVITY, -MAX_FRAME_DELTA, MAX_FRAME_DELTA));
+  if (sdy !== 0) sendScroll(sdy);
+}
+function cancelMomentum() {
+  if (momentumAnim) cancelAnimationFrame(momentumAnim);
+  momentumAnim = null;
+  velocity = 0;
+  momentumRemainder = 0;
+}
+function startMomentum(initialV) {
+  cancelMomentum();
+  velocity = initialV;
+  momentumRemainder = 0;
+  let lastTs = performance.now();
+  function step(ts) {
+    const dt = ts - lastTs;
+    lastTs = ts;
+    const delta = velocity * dt;
+    momentumRemainder += delta;
+    let sendDy = Math.round(momentumRemainder);
+    sendDy = clamp(sendDy*SENSITIVITY, -MAX_FRAME_DELTA, MAX_FRAME_DELTA);
+    if (sendDy !== 0) {
+      sendScroll(sendDy);
+      momentumRemainder -= sendDy;
+    }
+    const frames = dt / 16;
+    velocity *= Math.pow(DECELERATION_FACTOR, frames);
+    if (Math.abs(velocity) < MIN_VELOCITY) return;
+    momentumAnim = requestAnimationFrame(step);
   }
+  momentumAnim = requestAnimationFrame(step);
 }
 
-// --- event handlers ---
-
-pad.addEventListener('touchstart', e => {
-  // Prevent page scrolling (explicit because some browsers treat listeners as passive by default).
-  // We do not call preventDefault for the whole document here but for the pad specifically.
+pad.addEventListener("touchstart", e=>{
   e.preventDefault();
-
-  if (liftTimer) { clearTimeout(liftTimer); liftTimer = null; }
-  if (scrollGraceTimer) { clearTimeout(scrollGraceTimer); scrollGraceTimer = null; }
-
+  cancelMomentum();
+  if (liftTimer) clearTimeout(liftTimer);
+  if (scrollGraceTimer) clearTimeout(scrollGraceTimer);
   const touches = e.touches;
   touchStartTime = Date.now();
   touchStartCount = touches.length;
-  accumulatedMoveDuringTouch = 0;
+  accumulatedMove = 0;
   savePositions(touches);
-
-  // decide mode immediately on start:
   if (touches.length >= 2) {
-    mode = 'scroll';
-    // baseline average for two-finger scroll
-    lastAvg = avgTouchPoint(touches);
-    // reset ema so we don't inherit old deltas
-    ema = {dx:0, dy:0};
+    mode = "scroll"; lastAvg = avgTouchPoint(touches);
   } else {
-    mode = 'move';
-    lastAvg = null;
-    ema = {dx:0, dy:0};
+    mode = "move";
   }
   setMode(mode);
-}, { passive: false });
+}, {passive:false});
 
-pad.addEventListener('touchmove', e => {
-  e.preventDefault(); // we intentionally block default to manage pointer
+pad.addEventListener("touchmove", e=>{
+  e.preventDefault();
   const touches = e.touches;
-
   if (touches.length === 0) return;
-
-  // If the count changes but we already decided mode earlier, we keep heuristics:
-  if (mode === 'scroll') {
-    // compute new average
+  const now = performance.now();
+  if (mode === "scroll") {
     const curAvg = avgTouchPoint(touches);
-    const dy = curAvg.y - lastAvg.y;
-    const dx = curAvg.x - lastAvg.x; // horizontal two-finger motions could be used in future
+    const dy = (curAvg.y - lastAvg.y);
     lastAvg = curAvg;
-    accumulatedMoveDuringTouch += Math.abs(dy) + Math.abs(dx);
-
-    // send smoothed scroll
-    scheduleSendScroll(dy);
-  } else { // move mode (single finger)
-    // find the primary touch by id: we'll use first touch in the list
-    const t = touches[0];
-    const id = t.identifier;
-    const prev = lastPositions[id] || lastPositions[Object.keys(lastPositions)[0]] || {x:t.clientX, y:t.clientY};
-    const dx = t.clientX - prev.x;
-    const dy = t.clientY - prev.y;
-    lastPositions[id] = {x: t.clientX, y: t.clientY};
-    accumulatedMoveDuringTouch += Math.abs(dx) + Math.abs(dy);
-
-    scheduleSendMove(dx, dy);
-  }
-
-  // Reset any lift debounce if there's motion (user is still interacting)
-  if (liftTimer) { clearTimeout(liftTimer); liftTimer = null; }
-});
-
-pad.addEventListener('touchend', e => {
-  // On finger lift we don't immediately finalize. Start a short debounce to tolerate asynchronous lifts.
-  const touches = e.touches; // remaining touches after lift
-  const now = Date.now();
-
-  // Start a short debounce window: only finalize mode changes when there's no new touch within LIFT_DEBOUNCE_MS
-  if (liftTimer) clearTimeout(liftTimer);
-  liftTimer = setTimeout(()=> {
-    liftTimer = null;
-
-    if (touches.length === 0) {
-      // full end of gesture: decide if it's a click/tap or not
-      const duration = now - touchStartTime;
-      if (duration <= CLICK_TIME_MAX && accumulatedMoveDuringTouch <= CLICK_MOVE_MAX) {
-        // choose click type based on how many fingers were present at start:
-        if (touchStartCount === 1) sendClick(0x02);      // left click
-        else if (touchStartCount === 2) sendClick(0x03); // right click
-      }
-      // finalize
-      mode = 'none';
-      setMode('idle');
-      initialPositions = {};
-      lastPositions = {};
-      lastAvg = null;
-      ema = {dx:0, dy:0};
-      accumulatedMoveDuringTouch = 0;
-      if (sendPending !== null) { cancelAnimationFrame(sendPending); sendPending = null; }
-    } else if (touches.length === 1 && mode === 'scroll') {
-      // One finger lifted during a two-finger scroll — be forgiving:
-      // Keep scroll mode alive for a short grace period; if motion continues vertically we'll keep using scroll.
-      if (scrollGraceTimer) clearTimeout(scrollGraceTimer);
-      // Reset lastAvg to the current remaining finger baseline so we don't get a huge delta spike
-      lastAvg = avgTouchPoint(touches);
-      scrollGraceTimer = setTimeout(()=> {
-        scrollGraceTimer = null;
-        // No continuation: switch to single-finger move mode
-        mode = 'move';
-        // reset lastPositions to remaining touches
-        savePositions(touches);
-        ema = {dx:0, dy:0};
-        setMode('move');
-      }, SCROLL_GRACE_MS);
-      // still in scroll mode for now
-      setMode('scroll');
-    } else {
-      // touches.length >=2 -> remain in scroll; touches.length ===1 and we were move => remain move
-      if (touches.length >= 2) {
-        mode = 'scroll';
-        lastAvg = avgTouchPoint(touches);
-        setMode('scroll');
-      } else {
-        mode = 'move';
-        savePositions(touches);
-        setMode('move');
+    accumulatedMove += Math.abs(dy);
+    if (lastMoveTime !== null) {
+      const dt = now - lastMoveTime;
+      if (dt > 0) {
+        const instV = dy / dt;
+        velocity = VELOCITY_ALPHA * instV + (1 - VELOCITY_ALPHA) * velocity;
       }
     }
+    lastMoveTime = now;
+    scheduleSendScroll(dy);
+  } else {
+    const t = touches[0];
+    const prev = lastPositions[t.identifier] || {x:t.clientX, y:t.clientY};
+    const dx = t.clientX - prev.x;
+    const dy = t.clientY - prev.y;
+    lastPositions[t.identifier] = {x:t.clientX, y:t.clientY};
+    accumulatedMove += Math.abs(dx)+Math.abs(dy);
+    sendMove(dx*SENSITIVITY, dy*SENSITIVITY);
+  }
+}, {passive:false});
 
+pad.addEventListener("touchend", e=>{
+  const touches = e.touches;
+  const nowTime = Date.now();
+  if (liftTimer) clearTimeout(liftTimer);
+  liftTimer = setTimeout(()=>{
+    if (touches.length === 0) {
+      const duration = nowTime - touchStartTime;
+      if (duration <= CLICK_TIME_MAX && accumulatedMove <= CLICK_MOVE_MAX) {
+        if (touchStartCount === 1) sendClick(0x02);
+        else if (touchStartCount === 2) sendClick(0x03);
+      } else if (mode === "scroll" && Math.abs(velocity) >= MIN_VELOCITY) {
+        startMomentum(velocity);
+      }
+      mode = "idle"; setMode("idle");
+      initialPositions={}; lastPositions={}; lastAvg=null; ema={dx:0,dy:0};
+      accumulatedMove=0; lastMoveTime=null;
+    } else if (touches.length === 1 && mode === "scroll") {
+      if (scrollGraceTimer) clearTimeout(scrollGraceTimer);
+      lastAvg = avgTouchPoint(touches);
+      scrollGraceTimer = setTimeout(()=>{
+        mode = "move"; savePositions(touches); setMode("move");
+      }, SCROLL_GRACE_MS);
+    } else {
+      mode = (touches.length >= 2) ? "scroll" : "move";
+      setMode(mode);
+    }
   }, LIFT_DEBOUNCE_MS);
-}, { passive: false });
+}, {passive:false});
 
-// touchcancel: treat similarly to touchend (abort)
-pad.addEventListener('touchcancel', e => {
-  if (liftTimer) { clearTimeout(liftTimer); liftTimer = null; }
-  if (scrollGraceTimer) { clearTimeout(scrollGraceTimer); scrollGraceTimer = null; }
-  mode = 'none';
-  setMode('idle');
-  initialPositions = {}; lastPositions = {}; lastAvg = null; ema = {dx:0, dy:0};
+pad.addEventListener("touchcancel", ()=>{
+  cancelMomentum();
+  mode="idle"; setMode("idle");
 });
-
-// initialize UI badge
-setMode('idle');
 </script>
 </body>
 </html>
