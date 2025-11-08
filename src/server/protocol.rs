@@ -12,7 +12,7 @@ pub fn parse_packet(buf: &[u8]) -> Option<Packet> {
     if buf.len() < 1 { return None; }
 
     match buf[0] {
-        0x01 => { // MOVE
+        0x01 => {
             if buf.len() < 5 { return None; }
             let mut rdr = Cursor::new(&buf[1..]);
             let dx = rdr.read_i16::<LittleEndian>().ok()?;
@@ -21,7 +21,7 @@ pub fn parse_packet(buf: &[u8]) -> Option<Packet> {
         }
         0x02 => Some(Packet::LeftClick),
         0x03 => Some(Packet::RightClick),
-        0x04 => { // SCROLL (dy only)
+        0x04 => {
             if buf.len() < 3 { return None; }
             let mut rdr = Cursor::new(&buf[1..]);
             let dy = rdr.read_i16::<LittleEndian>().ok()?;

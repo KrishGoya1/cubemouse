@@ -30,7 +30,6 @@ pub fn handle_right_click() {
 pub fn handle_scroll(dy: i16) {
     let mut enigo = Enigo::new(&Settings::default()).unwrap();
 
-    // invert so scroll direction feels natural
     let amount = -(dy as i32 / 3); 
 
     enigo.scroll(amount, enigo::Axis::Vertical).unwrap();
