@@ -1,0 +1,246 @@
+mod server;
+
+use anyhow::Result;
+use local_ip_address::local_ip;
+use qrcode::QrCode;
+use qrcode::render::unicode;
+use serde_json::json;
+use tokio::task;
+use warp::Filter;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    println!("CubeMouse server starting...");
+
+    let ip = local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap());
+    let ws_url = format!("ws://{}:9000", ip);
+    let http_url = format!("http://{}:8080", ip);
+
+    println!("\nWebSocket: {}\n", ws_url);
+    println!("device ip : {ip}");
+
+    println!("Scan this QR to open touchpad:\n");
+    let code = QrCode::new(http_url.as_bytes())?;
+    let qr_string = code
+        .render::<unicode::Dense1x2>()
+        .quiet_zone(true)
+        .build();
+    println!("{}", qr_string);
+    println!("Or open manually: {}\n", http_url);
+
+    let ws_url_clone = ws_url.clone();
+    let ws_info = warp::path("ws-url").map(move || {
+        warp::reply::json(&json!({ "ws_url": ws_url_clone }))
+    });
+
+    let html_page = warp::path::end().map(|| {
+        warp::reply::html(r#"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CubeMouse — Apple-Perfect Scroll</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }
+  #pad { width: 100vw; height: 100vh; background: #222; touch-action: none; position: relative; }
+  #modeBadge { position: absolute; right: 12px; top: 12px; padding: 6px 10px; background: rgba(0,0,0,0.4); border-radius: 8px; font-size: 13px; color: #fff; pointer-events: none; transition: background .15s; }
+  #modeBadge.scroll { background: rgba(0,120,255,0.25); }
+  #modeBadge.move   { background: rgba(50,200,120,0.25); }
+  #controls { position: absolute; bottom: 12px; left: 12px; background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 10px; font-size: 12px; }
+  #controls label { display: block; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div id="pad">
+  <div id="modeBadge">idle</div>
+  <div id="controls">
+    <label>Friction: <input type="range" id="friction" min="0.90" max="0.99" step="0.001" value="0.945"></label>
+    <label>Sensitivity: <input type="range" id="sensitivity" min="0.5" max="2" step="0.05" value="1"></label>
+  </div>
+</div>
+
+<script>
+const ws = new WebSocket("ws://" + location.hostname + ":9000");
+ws.binaryType = "arraybuffer";
+
+function sendClick(op) {
+  const buf = new ArrayBuffer(1);
+  new DataView(buf).setUint8(0, op);
+  if (ws.readyState === 1) ws.send(buf);
+}
+function sendMove(dx, dy) {
+  const buf = new ArrayBuffer(5);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x01);
+  dv.setInt16(1, dx, true);
+  dv.setInt16(3, dy, true);
+  if (ws.readyState === 1) ws.send(buf);
+}
+function sendScroll(dy) {
+  const buf = new ArrayBuffer(3);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x04);
+  dv.setInt16(1, dy, true);
+  if (ws.readyState === 1) ws.send(buf);
+}
+
+const pad = document.getElementById("pad");
+const modeBadge = document.getElementById("modeBadge");
+const frictionSlider = document.getElementById("friction");
+const sensitivitySlider = document.getElementById("sensitivity");
+
+let DECELERATION_FACTOR = parseFloat(frictionSlider.value);
+let SENSITIVITY = parseFloat(sensitivitySlider.value);
+
+frictionSlider.addEventListener("input", () => DECELERATION_FACTOR = parseFloat(frictionSlider.value));
+sensitivitySlider.addEventListener("input", () => SENSITIVITY = parseFloat(sensitivitySlider.value));
+
+function setMode(m) { modeBadge.textContent = m; modeBadge.className = m; }
+
+const LIFT_DEBOUNCE_MS = 50;
+const SCROLL_GRACE_MS = 80;
+const CLICK_TIME_MAX = 170;
+const CLICK_MOVE_MAX = 10;
+const EMA_ALPHA = 0.25;
+const DECELERATION_BASE = 0.945;
+const MIN_VELOCITY = 0.015;
+const VELOCITY_ALPHA = 0.2;
+const MAX_FRAME_DELTA = 500;
+
+let touchStartTime = 0, touchStartCount = 0, accumulatedMove = 0;
+let mode = "idle", initialPositions = {}, lastPositions = {};
+let lastAvg = null, ema = { dx:0, dy:0 }, velocity = 0;
+let lastMoveTime = null, momentumAnim = null, momentumRemainder = 0;
+let liftTimer = null, scrollGraceTimer = null;
+
+function avgTouchPoint(touches) {
+  let sx=0, sy=0, n=touches.length;
+  for (let i=0; i<n; i++) { sx+=touches[i].clientX; sy+=touches[i].clientY; }
+  return { x:sx/n, y:sy/n };
+}
+function savePositions(touches) {
+  initialPositions={}; lastPositions={};
+  for (let i=0;i<touches.length;i++){
+    const t = touches[i];
+    initialPositions[t.identifier]={x:t.clientX,y:t.clientY};
+    lastPositions[t.identifier]={x:t.clientX,y:t.clientY};
+  }
+}
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function scheduleSendScroll(dy) {
+  ema.dy = EMA_ALPHA * dy + (1-EMA_ALPHA)*ema.dy;
+  const sdy = Math.round(clamp(ema.dy*SENSITIVITY, -MAX_FRAME_DELTA, MAX_FRAME_DELTA));
+  if (sdy !== 0) sendScroll(sdy);
+}
+function cancelMomentum() {
+  if (momentumAnim) cancelAnimationFrame(momentumAnim);
+  momentumAnim = null; velocity = 0; momentumRemainder = 0;
+}
+function startMomentum(initialV) {
+  cancelMomentum();
+  velocity = initialV; momentumRemainder = 0;
+  let lastTs = performance.now();
+  function step(ts) {
+    const dt = ts - lastTs; lastTs = ts;
+    const delta = velocity * dt; momentumRemainder += delta;
+    let sendDy = Math.round(momentumRemainder);
+    sendDy = clamp(sendDy*SENSITIVITY, -MAX_FRAME_DELTA, MAX_FRAME_DELTA);
+    if (sendDy !== 0) { sendScroll(sendDy); momentumRemainder -= sendDy; }
+    const frames = dt / 16; velocity *= Math.pow(DECELERATION_FACTOR, frames);
+    if (Math.abs(velocity) < MIN_VELOCITY) return;
+    momentumAnim = requestAnimationFrame(step);
+  }
+  momentumAnim = requestAnimationFrame(step);
+}
+
+pad.addEventListener("touchstart", e=>{
+  e.preventDefault(); cancelMomentum();
+  if (liftTimer) clearTimeout(liftTimer);
+  if (scrollGraceTimer) clearTimeout(scrollGraceTimer);
+  const touches = e.touches;
+  touchStartTime = Date.now(); touchStartCount = touches.length;
+  accumulatedMove = 0; savePositions(touches);
+  if (touches.length >= 2) { mode = "scroll"; lastAvg = avgTouchPoint(touches); }
+  else { mode = "move"; }
+  setMode(mode);
+}, {passive:false});
+
+pad.addEventListener("touchmove", e=>{
+  e.preventDefault();
+  const touches = e.touches;
+  if (touches.length === 0) return;
+  const now = performance.now();
+  if (mode === "scroll") {
+    const curAvg = avgTouchPoint(touches);
+    const dy = (curAvg.y - lastAvg.y);
+    lastAvg = curAvg; accumulatedMove += Math.abs(dy);
+    if (lastMoveTime !== null) {
+      const dt = now - lastMoveTime;
+      if (dt > 0) {
+        const instV = dy / dt;
+        velocity = VELOCITY_ALPHA * instV + (1 - VELOCITY_ALPHA) * velocity;
+      }
+    }
+    lastMoveTime = now; scheduleSendScroll(dy);
+  } else {
+    const t = touches[0];
+    const prev = lastPositions[t.identifier] || {x:t.clientX, y:t.clientY};
+    const dx = t.clientX - prev.x;
+    const dy = t.clientY - prev.y;
+    lastPositions[t.identifier] = {x:t.clientX, y:t.clientY};
+    accumulatedMove += Math.abs(dx)+Math.abs(dy);
+    sendMove(dx*SENSITIVITY, dy*SENSITIVITY);
+  }
+}, {passive:false});
+
+pad.addEventListener("touchend", e=>{
+  const touches = e.touches, nowTime = Date.now();
+  if (liftTimer) clearTimeout(liftTimer);
+  liftTimer = setTimeout(()=>{
+    if (touches.length === 0) {
+      const duration = nowTime - touchStartTime;
+      if (duration <= CLICK_TIME_MAX && accumulatedMove <= CLICK_MOVE_MAX) {
+        if (touchStartCount === 1) sendClick(0x02);
+        else if (touchStartCount === 2) sendClick(0x03);
+      } else if (mode === "scroll" && Math.abs(velocity) >= MIN_VELOCITY) {
+        startMomentum(velocity);
+      }
+      mode = "idle"; setMode("idle");
+      initialPositions={}; lastPositions={}; lastAvg=null;
+      ema={dx:0,dy:0}; accumulatedMove=0; lastMoveTime=null;
+    } else if (touches.length === 1 && mode === "scroll") {
+      if (scrollGraceTimer) clearTimeout(scrollGraceTimer);
+      lastAvg = avgTouchPoint(touches);
+      scrollGraceTimer = setTimeout(()=>{
+        mode = "move"; savePositions(touches); setMode("move");
+      }, SCROLL_GRACE_MS);
+    } else {
+      mode = (touches.length >= 2) ? "scroll" : "move";
+      setMode(mode);
+    }
+  }, LIFT_DEBOUNCE_MS);
+}, {passive:false});
+
+pad.addEventListener("touchcancel", ()=>{
+  cancelMomentum(); mode="idle"; setMode("idle");
+});
+</script>
+</body>
+</html>
+"#)
+    });
+
+    let routes = ws_info.or(html_page);
+
+    let ws_task = task::spawn(async {
+        if let Err(e) = server::transport::run_server("0.0.0.0:9000").await {
+            eprintln!("WebSocket server error: {:?}", e);
+        }
+    });
+
+    warp::serve(routes).run(([0, 0, 0, 0], 8080)).await;
+
+    let _ = ws_task.await;
+
+    Ok(())
+}
