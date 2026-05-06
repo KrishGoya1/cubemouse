@@ -8,7 +8,11 @@
 
 ---
 
-## 📖 Overview
+## Animation
+
+https://github.com/user-attachments/assets/d6979f31-3fcb-4443-a7ef-02fe46b833d7
+
+## Overview
 
 **CubeMouse** is a lightweight cross-device interaction system written in **Rust**, designed to transform a smartphone into a wireless trackpad for a PC.  
 It establishes a secure, low-latency WebSocket connection between the devices and transmits binary-encoded input events (cursor movement, clicks, scrolls, etc.) in real-time.
@@ -17,20 +21,20 @@ This project is both a learning experience in systems design and a demonstration
 
 ---
 
-## 🎯 Project Vision
+## Project Vision
 
 > **To create a minimal, performant, and extensible framework that turns a smartphone into a seamless input device for a PC, while demonstrating production-grade code structure and documentation quality.**
 
 ### Objectives
-- ✨ Write idiomatic, modular **Rust** code.  
-- ⚡ Build a **custom binary protocol** for efficiency.  
-- 🔒 Maintain a **secure, persistent WebSocket channel**.  
-- 🧩 Keep architecture clean, extensible, and well-documented.  
-- 💡 Demonstrate **real-world engineering thinking** in a small project.
+- Write idiomatic, modular **Rust** code.  
+- Build a **custom binary protocol** for efficiency.  
+- Maintain a **secure, persistent WebSocket channel**.  
+- Keep architecture clean, extensible, and well-documented.  
+- Demonstrate **real-world engineering thinking** in a small project.
 
 ---
 
-## 🧱 System Architecture
+## System Architecture
 
 ### High-Level Overview
 
@@ -63,7 +67,7 @@ Channel    │
 
 ---
 
-## 🧩 Module Responsibilities
+## Module Responsibilities
 
 | Module | Platform | Description |
 |---------|-----------|-------------|
@@ -77,7 +81,7 @@ Channel    │
 
 ---
 
-## 🔌 Communication Flow
+## Communication Flow
 
 1. **Pairing Phase**
    - PC launches WebSocket server and generates a QR code with connection info.
@@ -96,7 +100,7 @@ Channel    │
 
 ---
 
-## ⚙️ CubeMouse Binary Protocol v1
+## CubeMouse Binary Protocol v1
 
 ### Packet Structure
 
@@ -197,7 +201,7 @@ Runtime parameter update.
 
 ---
 
-## 🧠 Design Rationale
+## Design Rationale
 
 ### Why Binary?
 - Lower latency and CPU overhead than JSON.
@@ -216,7 +220,7 @@ Runtime parameter update.
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |--------|-------------|
@@ -229,19 +233,19 @@ Runtime parameter update.
 
 ---
 
-## 🚧 Roadmap
+## Roadmap
 
 | Feature | Description | Status |
 |----------|--------------|--------|
-| Gestures | Pinch, rotate, swipe | 🔜 Planned |
-| Multi-touch | Finger tracking | 🔜 Planned |
-| Secure Channel | TLS / encryption | 🔜 Planned |
-| Desktop GUI | QR display + logs | 🧠 Design |
-| Config Sync | Per-device profiles | 🔜 Future |
+| Gestures | Pinch, rotate, swipe | Planned |
+| Multi-touch | Finger tracking | Planned |
+| Secure Channel | TLS / encryption | Planned |
+| Desktop GUI | QR display + logs | Design |
+| Config Sync | Per-device profiles | Future |
 
 ---
 
-## 🧪 Development Guidelines
+## Development Guidelines
 
 - **Project Structure**
 ```
@@ -268,14 +272,14 @@ src/
 
 ---
 
-## 🧭 Summary
+## Summary
 
 CubeMouse combines **low-level system design** with **clean architecture principles**.  
 It’s built to be efficient, educational, and production-minded — an example of how to think like a **systems engineer** rather than just a coder.
 
 ---
 
-## 📄 Appendix
+## Appendix
 
 > **Design Principles**
 > - Separate concerns — *transport*, *parsing*, *action* should never mix.  
